@@ -10,6 +10,8 @@ Object.defineProperty(exports, "__esModule", {
 
 var _createClass = function () { function defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } } return function (Constructor, protoProps, staticProps) { if (protoProps) defineProperties(Constructor.prototype, protoProps); if (staticProps) defineProperties(Constructor, staticProps); return Constructor; }; }();
 
+function _defineProperty(obj, key, value) { if (key in obj) { Object.defineProperty(obj, key, { value: value, enumerable: true, configurable: true, writable: true }); } else { obj[key] = value; } return obj; }
+
 function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
 
 var defaultConfig = {
@@ -134,7 +136,7 @@ var HyperList = function () {
   }, {
     key: 'refresh',
     value: function refresh(element, userProvidedConfig) {
-      var _this2 = this;
+      var _scrollerStyle;
 
       Object.assign(this._config, defaultConfig, userProvidedConfig);
 
@@ -147,7 +149,7 @@ var HyperList = function () {
       var userScroller = config.isReact ? { key: 'scroller' } : document.createElement(config.scrollerTagName || 'tr');
       var scroller = this._scroller || config.scroller || userScroller;
 
-      this._element = config.isReact ? {} : element;
+      this._element = config.isReact ? this._element || {} : element;
 
       // Default configuration option `useFragment` to `true`.
       if (typeof config.useFragment !== 'boolean') {
@@ -165,7 +167,7 @@ var HyperList = function () {
       if (!Array.isArray(config.itemHeight) && !isNumber(config.itemHeight)) {
         throw new Error('\n        Invalid required `itemHeight` value, expected number or array\n      '.trim());
       } else if (isNumber(config.itemHeight)) {
-        this._itemHeights = Array(config.total).fill(config.itemHeight);
+        this._itemHeights = Array(Number(config.total)).fill(config.itemHeight);
       } else {
         this._itemHeights = config.itemHeight;
       }
@@ -177,7 +179,6 @@ var HyperList = function () {
       }).forEach(function (prop) {
         var value = config[prop];
         var isValueNumber = isNumber(value);
-        var isValuePercent = isValueNumber ? false : value.slice(-1) === '%';
 
         if (value && typeof value !== 'string' && typeof value !== 'number') {
           var msg = 'Invalid optional `' + prop + '`, expected string or number';
@@ -185,20 +186,24 @@ var HyperList = function () {
         } else if (isValueNumber) {
           config[prop] = value + 'px';
         }
+      });
 
-        if (prop !== 'height') {
-          return;
-        }
+      var isHoriz = Boolean(config.horizontal);
+      var value = config[isHoriz ? 'width' : 'height'];
 
+      if (value) {
+        var isValueNumber = isNumber(value);
+        var isValuePercent = isValueNumber ? false : value.slice(-1) === '%';
         // Compute the containerHeight as number
         var numberValue = isValueNumber ? value : parseInt(value.replace(/px|%/, ''), 10);
+        var innerSize = window[isHoriz ? 'innerWidth' : 'innerHeight'];
 
         if (isValuePercent) {
-          _this2._containerHeight = window.innerHeight * numberValue / 100;
+          this._containerSize = innerSize * numberValue / 100;
         } else {
-          _this2._containerHeight = isNumber(value) ? value : numberValue;
+          this._containerSize = isNumber(value) ? value : numberValue;
         }
-      });
+      }
 
       // If using React, the element object turns into a props object.
       if (config.isReact) {
@@ -230,38 +235,34 @@ var HyperList = function () {
         console.warn(['HyperList: The maximum element height', maxElementHeight + 'px has', 'been exceeded; please reduce your item height.'].join(' '));
       }
 
-      var scrollerStyle = {
+      var scrollerStyle = (_scrollerStyle = {
         opacity: '0',
-        position: 'absolute',
-        width: '1px',
-        height: scrollerHeight + 'px'
-      };
+        position: 'absolute'
+      }, _defineProperty(_scrollerStyle, isHoriz ? 'height' : 'width', '1px'), _defineProperty(_scrollerStyle, isHoriz ? 'width' : 'height', scrollerHeight + 'px'), _scrollerStyle);
 
       if (config.isReact) {
-        scroller.style = Object.assign({}, scroller.style, {
-          opacity: 0,
-          position: 'absolute',
-          width: '1px',
-          height: scrollerHeight + 'px'
-        });
-      } else {
-        HyperList.mergeStyle(scroller, scrollerStyle);
-
-        // Only append the scroller element once.
-        if (!this._scroller) {
-          element.appendChild(scroller);
-        }
+        scroller.style = {};
+      } else if (!this._scroller) {
+        element.appendChild(scroller);
       }
+
+      HyperList.mergeStyle(scroller, scrollerStyle);
 
       // Set the scroller instance.
       this._scroller = scroller;
-      this._scrollHeight = this._computeScrollHeight();
 
       // Reuse the item positions if refreshed, otherwise set to empty array.
       this._itemPositions = this._itemPositions || Array(config.total).fill(0);
 
+      // Need to calculate scrollHeight before computing positions when using
+      // reverse mode.
+      if (config.reverse) {
+        this._scrollHeight = this._computeScrollHeight();
+      }
+
       // Each index in the array should represent the position in the DOM.
       this._computePositions(0);
+      this._scrollHeight = this._computeScrollHeight();
 
       // Render after refreshing. Force render if we're calling refresh manually.
       this._renderChunk(this._lastRepaint !== null);
@@ -274,6 +275,7 @@ var HyperList = function () {
     key: '_getRow',
     value: function _getRow(i) {
       var config = this._config;
+      var isHoriz = config.horizontal;
       var item = config.generate(i);
       var height = item.height;
 
@@ -302,23 +304,21 @@ var HyperList = function () {
         } else if (config.isReact) {
             var _oldClass = item.props.className || '';
 
-            return React.cloneElement(item, {
+            return config.cloneElement(item, {
               key: i,
               className: _oldClass + ' ' + (config.rowClassName || 'vrow'),
-              style: Object.assign({}, item.props.style, {
-                position: 'absolute',
-                top: top + 'px'
-              })
+              style: Object.assign({}, item.props.style, _defineProperty({
+                position: 'absolute'
+              }, isHoriz ? 'left' : 'top', top + 'px'))
             });
           }
 
       var oldClass = item.getAttribute('class') || '';
       item.setAttribute('class', oldClass + ' ' + (config.rowClassName || 'vrow'));
 
-      HyperList.mergeStyle(item, {
-        position: 'absolute',
-        top: top + 'px'
-      });
+      HyperList.mergeStyle(item, _defineProperty({
+        position: 'absolute'
+      }, config.horizontal ? 'left' : 'top', top + 'px'));
 
       return item;
     }
@@ -331,7 +331,7 @@ var HyperList = function () {
         return config.overrideScrollPosition();
       }
 
-      return this._element.scrollTop;
+      return this._element[config.horizontal ? 'scrollLeft' : 'scrollTop'];
     }
   }, {
     key: '_renderChunk',
@@ -415,20 +415,20 @@ var HyperList = function () {
   }, {
     key: '_computeScrollHeight',
     value: function _computeScrollHeight() {
-      var _this3 = this;
+      var _HyperList$mergeStyle2,
+          _this2 = this;
 
       var config = this._config;
+      var isHoriz = Boolean(config.horizontal);
       var total = config.total;
       var scrollHeight = this._itemHeights.reduce(function (a, b) {
         return a + b;
       }, 0);
 
-      HyperList.mergeStyle(this._scroller, {
+      HyperList.mergeStyle(this._scroller, (_HyperList$mergeStyle2 = {
         opacity: 0,
-        position: 'absolute',
-        width: '1px',
-        height: scrollHeight + 'px'
-      });
+        position: 'absolute'
+      }, _defineProperty(_HyperList$mergeStyle2, isHoriz ? 'height' : 'width', '1px'), _defineProperty(_HyperList$mergeStyle2, isHoriz ? 'width' : 'height', scrollHeight + 'px'), _HyperList$mergeStyle2));
 
       // Calculate the height median
       var sortedItemHeights = this._itemHeights.slice(0).sort(function (a, b) {
@@ -437,9 +437,10 @@ var HyperList = function () {
       var middle = Math.floor(total / 2);
       var averageHeight = total % 2 === 0 ? (sortedItemHeights[middle] + sortedItemHeights[middle - 1]) / 2 : sortedItemHeights[middle];
 
-      var containerHeight = this._element.clientHeight ? this._element.clientHeight : this._containerHeight;
+      var clientProp = isHoriz ? 'clientWidth' : 'clientHeight';
+      var containerHeight = (this._element[clientProp] ? this._element[clientProp] : this._containerSize) || config.width;
       this._screenItemsLen = Math.ceil(containerHeight / averageHeight);
-      this._containerHeight = containerHeight;
+      this._containerSize = containerHeight;
 
       // Cache 3 times the number of items that fit in the container viewport.
       this._cachedItemsLen = Math.max(this._cachedItemsLen || 0, this._screenItemsLen * 3);
@@ -447,7 +448,11 @@ var HyperList = function () {
 
       if (config.reverse) {
         window.requestAnimationFrame(function () {
-          _this3._element.scrollTop = scrollHeight;
+          if (isHoriz) {
+            _this2._element.scrollLeft = scrollHeight;
+          } else {
+            _this2._element.scrollTop = scrollHeight;
+          }
         });
       }
 
@@ -469,7 +474,7 @@ var HyperList = function () {
     value: function _getReverseFrom(scrollTop) {
       var i = this._config.total - 1;
 
-      while (i > 0 && this._itemPositions[i] < scrollTop + this._containerHeight) {
+      while (i > 0 && this._itemPositions[i] < scrollTop + this._containerSize) {
         i--;
       }
 
